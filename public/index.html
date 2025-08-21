@@ -118,7 +118,7 @@
         const wind = await getWindData(lat, lon);
 
         // Вычисляем смещение по формуле для карты
-        const angleRad = ((wind.deg-90)%360)*Math.PI/180;
+        const angleRad = ((wind.deg)%360)*Math.PI/180;
         const dx = wind.speed*Math.sin(angleRad);
         const dy = -wind.speed*Math.cos(angleRad);
         const newLat = lat + (dy/111320); // пересчет смещения в градусы
