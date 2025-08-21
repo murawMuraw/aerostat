@@ -2,34 +2,40 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Вход</title>
+  <title>Авторизация</title>
+  <style>
+    body { font-family: sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f0f0; }
+    #loginForm { background:#fff; padding:20px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.2); }
+    input { display:block; margin:10px 0; padding:8px; width:200px; }
+    button { padding:8px 16px; }
+  </style>
 </head>
 <body>
-  <h2>Авторизация</h2>
-  <form id="loginForm">
-    <input type="text" id="username" placeholder="Логин"><br>
-    <input type="password" id="password" placeholder="Пароль"><br>
-    <button type="submit">Войти</button>
-  </form>
+  <div id="loginForm">
+    <h3>Вход</h3>
+    <input type="text" id="username" placeholder="Логин">
+    <input type="password" id="password" placeholder="Пароль">
+    <button id="loginBtn">Войти</button>
+  </div>
 
   <script>
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+    document.getElementById('loginBtn').addEventListener('click', async () => {
       const username = document.getElementById('username').value;
       const password = document.getElementById('password').value;
 
       const res = await fetch('/api/login', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username, password})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
       });
 
       if (res.ok) {
-        window.location.href = '/index.html';
+        window.location.href = '/'; // После входа переходим на карту
       } else {
-        alert("Неверный логин или пароль");
+        alert('Неверный логин или пароль');
       }
     });
   </script>
 </body>
 </html>
+
