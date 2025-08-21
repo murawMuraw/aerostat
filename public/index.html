@@ -1,102 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>Карта с кругом и ветром</title>
+  <meta charset="UTF-8">
+  <title>Аэростат</title>
   <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
   <style>
-    html, body, #map { width:100%; height:100%; margin:0; padding:0; }
-    #windInfo, #pathInfo {
-      position:absolute; left:10px; padding:10px;
-      background:rgba(255,255,255,0.9); z-index:1000;
-      font-family:sans-serif; font-size:14px; white-space:pre-line;
+    html, body, #map {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
     }
-    #windInfo { top:10px; }
-    #pathInfo { top:70px; }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 8px;
+      font-family: Arial, sans-serif;
+    }
   </style>
 </head>
 <body>
-<div id="windInfo">Скорость и направление ветра</div>
-<div id="pathInfo">Длина пути: 0 км</div>
-<div id="map"></div>
+  <div id="map"></div>
+  <div id="info">
+    <button onclick="startMoving()">Старт</button>
+    <button onclick="stopMoving()">Стоп</button>
+    <div id="pathLength">Длина пути: 0 км</div>
+  </div>
 
-<script>
-  const apiKey = '080b3dab3f26f4e8d44b5d87f4c3ee78';
-  let map, circle, arrow, historyLine;
-  let moveTimer = null;
-  const path = [];
+  <script>
+    let map, circle, arrow, path;
+    let moveTimer = null;
+    let windTimer = null;
+    let lastWind = { speed: 0, deg: 0 };
+    let totalDistance = 0; // суммарный путь в метрах
 
-  function getWindData(lat, lon) {
-    return fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`)
-      .then(res => res.json())
-      .then(data => ({ speed: data.wind.speed, deg: data.wind.deg }));
-  }
-
-  // Функция вычисления расстояния в км между двумя точками по формуле Хаверсина
-  function haversineDistance(coord1, coord2) {
-    const R = 6371;
-    const toRad = x => x * Math.PI / 180;
-    const dLat = toRad(coord2[0] - coord1[0]);
-    const dLon = toRad(coord2[1] - coord1[1]);
-    const lat1 = toRad(coord1[0]);
-    const lat2 = toRad(coord2[0]);
-    const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
-    const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }
-
-  ymaps.ready(() => {
-    map = new ymaps.Map("map", { center:[51.5,0.0], zoom:5 });
-
-    map.events.add('click', async function(e) {
-      const coords = e.get('coords');
-      if (circle) { map.geoObjects.remove(circle); map.geoObjects.remove(arrow); map.geoObjects.remove(historyLine); clearInterval(moveTimer); path.length=0; }
-
-      circle = new ymaps.Circle([coords,10000], {}, { fillColor:"#87CEEB", fillOpacity:0.15, strokeColor:"#87CEEB", strokeWidth:2, strokeOpacity:0.6 });
-      map.geoObjects.add(circle);
-
-      arrow = new ymaps.Placemark(coords, {}, { preset:'islands#redArrowIcon', iconRotate:true, iconRotation:0 });
-      map.geoObjects.add(arrow);
-
-      historyLine = new ymaps.Polyline([], {}, { strokeColor:"#0000FF", strokeWidth:2, strokeOpacity:0.6 });
-      map.geoObjects.add(historyLine);
-
-      startMoving();
-    });
-  });
-
-  function startMoving() {
-    moveTimer = setInterval(async () => {
-      const [lat, lon] = circle.geometry.getCoordinates();
+    // Функция получения ветра по координатам
+    async function getWindData(lat, lon) {
       try {
-        const wind = await getWindData(lat, lon);
-        const angleRad = ((wind.deg)%360)*Math.PI/180;
-        const dx = wind.speed*Math.sin(angleRad);
-        const dy = -wind.speed*Math.cos(angleRad);
-        const newLat = lat + (dy/111320);
-        const newLon = lon + (dx/(40075000*Math.cos(lat*Math.PI/180)/360));
-        const newCoords = [newLat,newLon];
+        const res = await fetch(`/api/wind?lat=${lat}&lon=${lon}`);
+        return await res.json();
+      } catch (e) {
+        console.error("Ошибка получения ветра:", e);
+        return { speed: 0, deg: 0 };
+      }
+    }
 
-        circle.geometry.setCoordinates(newCoords);
-        arrow.geometry.setCoordinates(newCoords);
-        arrow.options.set('iconRotation', wind.deg);
+    // Функция для вычисления новых координат по смещению
+    function movePoint(lat, lon, distance, bearing) {
+      const R = 6371000; // радиус Земли в м
+      const δ = distance / R;
+      const θ = bearing * Math.PI / 180;
 
-        path.push(newCoords);
-        historyLine.geometry.setCoordinates(path);
+      const φ1 = lat * Math.PI / 180;
+      const λ1 = lon * Math.PI / 180;
 
-        // обновляем скорость и направление ветра
-        document.getElementById('windInfo').innerText = `Скорость ветра: ${wind.speed.toFixed(1)} м/с\nНаправление: ${wind.deg}°`;
-
-        // вычисляем длину пути
-        let totalDistance = 0;
-        for (let i=1; i<path.length; i++) {
-          totalDistance += haversineDistance(path[i-1], path[i]);
-        }
-        document.getElementById('pathInfo').innerText = `Длина пути: ${totalDistance.toFixed(2)} км`;
-
-      } catch(e) { console.error(e); document.getElementById('windInfo').innerText="Ошибка получения данных ветра"; }
-    },1000);
-  }
-</script>
-</body>
-</html>
+      const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
