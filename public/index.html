@@ -58,3 +58,93 @@
       const λ1 = lon * Math.PI / 180;
 
       const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
+                           Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+      const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                                 Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+
+      return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
+    }
+
+    // Обновление длины пути
+    function updatePathLength() {
+      document.getElementById("pathLength").innerText = 
+        "Длина пути: " + (totalDistance / 1000).toFixed(2) + " км";
+    }
+
+    // Один запрос погоды
+    async function updateWind() {
+      const [lat, lon] = circle.geometry.getCoordinates();
+      lastWind = await getWindData(lat, lon);
+      console.log("Новый ветер:", lastWind);
+    }
+
+    // Запуск движения
+    function startMoving() {
+      if (moveTimer) return; // если уже движется — выходим
+
+      updateWind(); // первый запрос ветра
+
+      // обновляем ветер раз в 60 секунд
+      windTimer = setInterval(updateWind, 60000);
+
+      // двигаем круг каждую секунду
+      moveTimer = setInterval(() => {
+        const [lat, lon] = circle.geometry.getCoordinates();
+
+        // смещение за 1 секунду = скорость (м/с) * 1
+        const distance = lastWind.speed * 1;
+        const direction = lastWind.deg;
+
+        const newLatLon = movePoint(lat, lon, distance, direction);
+
+        // прибавляем к общему пути
+        totalDistance += distance;
+
+        // обновляем объекты на карте
+        circle.geometry.setCoordinates(newLatLon);
+        arrow.geometry.setCoordinates([
+          newLatLon, 
+          movePoint(newLatLon[0], newLatLon[1], 500, direction)
+        ]);
+        path.geometry.setCoordinates([...path.geometry.getCoordinates(), newLatLon]);
+
+        updatePathLength();
+      }, 1000);
+    }
+
+    // Остановка
+    function stopMoving() {
+      clearInterval(moveTimer);
+      clearInterval(windTimer);
+      moveTimer = null;
+      windTimer = null;
+    }
+
+    // Инициализация карты
+    ymaps.ready(() => {
+      map = new ymaps.Map("map", {
+        center: [51.4779, 0.0015], // Гринвич
+        zoom: 10
+      });
+
+      circle = new ymaps.Circle([[51.4779, 0.0015], 15000], {}, {
+        fillColor: "rgba(0,0,255,0.3)",
+        strokeWidth: 2
+      });
+
+      arrow = new ymaps.Polyline([], {}, {
+        strokeColor: "#ff0000",
+        strokeWidth: 2,
+        arrow: true
+      });
+
+      path = new ymaps.Polyline([[51.4779, 0.0015]], {}, {
+        strokeColor: "#00ff00",
+        strokeWidth: 2
+      });
+
+      map.geoObjects.add(circle).add(arrow).add(path);
+    });
+  </script>
+</body>
+</html>
