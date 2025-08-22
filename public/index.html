@@ -3,154 +3,125 @@
 <head>
   <meta charset="utf-8">
   <title>Карта с кругом и ветром</title>
-  
-  <!-- Подключение API Яндекс.Карт -->
   <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
-  
   <style>
-    /* Полное заполнение окна картой */
     html, body, #map { width:100%; height:100%; margin:0; padding:0; }
-
-    /* Информационный блок для скорости и направления ветра */
     #windInfo, #pathInfo {
-      position:absolute; 
-      left:10px; 
-      padding:10px;
-      background:rgba(255,255,255,0.9); 
-      z-index:1000;
-      font-family:sans-serif; 
-      font-size:14px; 
-      white-space:pre-line;
+      position:absolute; left:10px; padding:10px;
+      background:rgba(255,255,255,0.9); z-index:1000;
+      font-family:sans-serif; font-size:14px; white-space:pre-line;
     }
-    #windInfo { top:10px; }    /* Блок с ветром сверху */
-    #pathInfo { top:70px; }    /* Блок с длиной пути чуть ниже */
+    #windInfo { top:10px; }
+    #pathInfo { top:70px; }
   </style>
 </head>
 <body>
 
-<!-- Блок с информацией о ветре -->
 <div id="windInfo">Скорость и направление ветра</div>
-
-<!-- Блок с длиной пройденного пути -->
 <div id="pathInfo">Длина пути: 0 км</div>
-
-<!-- Контейнер для карты -->
 <div id="map"></div>
 
 <script>
-  // API ключ OpenWeather для получения данных ветра
   const apiKey = '080b3dab3f26f4e8d44b5d87f4c3ee78';
-
   let map, circle, arrow, historyLine;
-  let moveTimer = null;
-  const path = []; // Массив для хранения координат пути
+  let moveTimer = null, windTimer = null;
+  const path = [];
+  let currentWind = { speed: 0, deg: 0 };
 
-  // Получение скорости и направления ветра для заданных координат
   function getWindData(lat, lon) {
     return fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`)
       .then(res => res.json())
       .then(data => ({ speed: data.wind.speed, deg: data.wind.deg }));
   }
 
-  // Функция для вычисления расстояния между двумя координатами (в км)
   function haversineDistance(coord1, coord2) {
-    const R = 6371; // Радиус Земли в км
+    const R = 6371;
     const toRad = x => x * Math.PI / 180;
     const dLat = toRad(coord2[0] - coord1[0]);
     const dLon = toRad(coord2[1] - coord1[1]);
     const lat1 = toRad(coord1[0]);
     const lat2 = toRad(coord2[0]);
-
     const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
     const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c; // расстояние в км
+    return R * c;
   }
 
-  // Инициализация карты после загрузки API Яндекс.Карт
   ymaps.ready(() => {
     map = new ymaps.Map("map", { center:[51.5,0.0], zoom:5 });
 
-    // Событие клика на карте — создание круга, стрелки и линии пути
     map.events.add('click', async function(e) {
       const coords = e.get('coords');
 
-      // Если объекты уже есть, удаляем их и сбрасываем путь
-      if (circle) { 
-        map.geoObjects.remove(circle); 
-        map.geoObjects.remove(arrow); 
-        map.geoObjects.remove(historyLine); 
-        clearInterval(moveTimer); 
-        path.length=0; 
+      if (circle) {
+        map.geoObjects.remove(circle);
+        map.geoObjects.remove(arrow);
+        map.geoObjects.remove(historyLine);
+        clearInterval(moveTimer);
+        clearInterval(windTimer);
+        path.length = 0;
       }
 
-      // Создание круга с радиусом 10 км
-      circle = new ymaps.Circle([coords,10000], {}, { 
-        fillColor:"#87CEEB", fillOpacity:0.15, 
-        strokeColor:"#87CEEB", strokeWidth:2, strokeOpacity:0.6 
+      circle = new ymaps.Circle([coords,10000], {}, {
+        fillColor:"#87CEEB", fillOpacity:0.15,
+        strokeColor:"#87CEEB", strokeWidth:2, strokeOpacity:0.6
       });
       map.geoObjects.add(circle);
 
-      // Создание стрелки текущей позиции
-      arrow = new ymaps.Placemark(coords, {}, { 
-        preset:'islands#redArrowIcon', 
-        iconRotate:true, 
-        iconRotation:0 
+      arrow = new ymaps.Placemark(coords, {}, {
+        preset:'islands#redArrowIcon',
+        iconRotate:true,
+        iconRotation:0
       });
       map.geoObjects.add(arrow);
 
-      // Создание линии пути
-      historyLine = new ymaps.Polyline([], {}, { 
-        strokeColor:"#0000FF", strokeWidth:2, strokeOpacity:0.6 
+      historyLine = new ymaps.Polyline([], {}, {
+        strokeColor:"#0000FF", strokeWidth:2, strokeOpacity:0.6
       });
       map.geoObjects.add(historyLine);
 
-      // Запуск движения круга по ветру
       startMoving();
     });
   });
 
-  // Функция движения круга и обновления данных
   function startMoving() {
-    moveTimer = setInterval(async () => {
+    const updateWind = async () => {
       const [lat, lon] = circle.geometry.getCoordinates();
       try {
-        // Получаем данные ветра
         const wind = await getWindData(lat, lon);
-
-        // Вычисляем смещение по формуле для карты
-        const angleRad = ((wind.deg)%360)*Math.PI/180;
-        const dx = wind.speed*Math.sin(angleRad);
-        const dy = -wind.speed*Math.cos(angleRad);
-        const newLat = lat + (dy/111320); // пересчет смещения в градусы
-        const newLon = lon + (dx/(40075000*Math.cos(lat*Math.PI/180)/360));
-
-        const newCoords = [newLat,newLon];
-
-        // Обновляем координаты круга и стрелки
-        circle.geometry.setCoordinates(newCoords);
-        arrow.geometry.setCoordinates(newCoords);
-        arrow.options.set('iconRotation', wind.deg);
-
-        // Добавляем новую точку в путь и обновляем линию
-        path.push(newCoords);
-        historyLine.geometry.setCoordinates(path);
-
-        // Обновляем информацию о ветре
-        document.getElementById('windInfo').innerText = 
+        currentWind = wind;
+        document.getElementById('windInfo').innerText =
           `Скорость ветра: ${wind.speed.toFixed(1)} м/с\nНаправление: ${wind.deg}°`;
-
-        // Вычисляем длину пройденного пути
-        let totalDistance = 0;
-        for (let i=1; i<path.length; i++) {
-          totalDistance += haversineDistance(path[i-1], path[i]);
-        }
-        document.getElementById('pathInfo').innerText = `Длина пути: ${totalDistance.toFixed(2)} км`;
-
-      } catch(e) { 
-        console.error(e); 
-        document.getElementById('windInfo').innerText="Ошибка получения данных ветра"; 
+      } catch(e) {
+        console.error(e);
+        document.getElementById('windInfo').innerText = "Ошибка получения данных ветра";
       }
-    },1000); // Обновление каждые 1 секунд
+    };
+
+    updateWind();
+    windTimer = setInterval(updateWind, 60000);
+
+    moveTimer = setInterval(() => {
+      const [lat, lon] = circle.geometry.getCoordinates();
+      const angleRad = ((currentWind.deg)%360)*Math.PI/180;
+      const dx = currentWind.speed*Math.sin(angleRad);
+      const dy = -currentWind.speed*Math.cos(angleRad);
+      const newLat = lat + (dy/111320);
+      const newLon = lon + (dx/(40075000*Math.cos(lat*Math.PI/180)/360));
+      const newCoords = [newLat, newLon];
+
+      circle.geometry.setCoordinates(newCoords);
+      arrow.geometry.setCoordinates(newCoords);
+      arrow.options.set('iconRotation', currentWind.deg);
+
+      path.push(newCoords);
+      historyLine.geometry.setCoordinates(path);
+
+      let totalDistance = 0;
+      for (let i = 1; i < path.length; i++) {
+        totalDistance += haversineDistance(path[i - 1], path[i]);
+      }
+      document.getElementById('pathInfo').innerText = `Длина пути: ${totalDistance.toFixed(2)} км`;
+    }, 1000);
   }
 </script>
 </body>
