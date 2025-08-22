@@ -102,7 +102,7 @@
 
     moveTimer = setInterval(() => {
       const [lat, lon] = circle.geometry.getCoordinates();
-      const angleRad = ((currentWind.deg)%360)*Math.PI/180;
+      const angleRad = ((currentWind.deg+90)%360)*Math.PI/180;
       const dx = currentWind.speed*Math.sin(angleRad);
       const dy = -currentWind.speed*Math.cos(angleRad);
       const newLat = lat + (dy/111320);
