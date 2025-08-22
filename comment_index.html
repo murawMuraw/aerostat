@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Карта с кругом и ветром</title>
+  <!-- Подключение API Яндекс.Карт -->
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
+  <style>
+    /* Установка стилей для всей страницы и карты */
+    html, body, #map { width:100%; height:100%; margin:0; padding:0; }
+    #windInfo, #pathInfo {
+      position:absolute; left:10px; padding:10px;
+      background:rgba(255,255,255,0.9); z-index:1000; /* Обеспечивает видимость над картой */
+      font-family:sans-serif; font-size:14px; white-space:pre-line;
+    }
+    #windInfo { top:10px; } /* Позиционирование блока информации о ветре */
+    #pathInfo { top:70px; } /* Позиционирование блока информации о пути */
+  </style>
+</head>
+<body>
+
+<div id="windInfo">Скорость и направление ветра</div> <!-- Блок для отображения информации о ветре -->
+<div id="pathInfo">Длина пути: 0 км</div> <!-- Блок для отображения длины пути -->
+<div id="map"></div> <!-- Контейнер для карты -->
+
+<script>
+  const apiKey = '080b3dab3f26f4e8d44b5d87f4c3ee78'; // API ключ для доступа к OpenWeatherMap
+  let map, circle, arrow, historyLine; // Объявление переменных для карты, круга, стрелки и линии пути
+  let moveTimer = null, windTimer = null; // Таймеры для движения и обновления ветра
+  const path = []; // Массив для хранения координат пути
+  let currentWind = { speed: 0, deg: 0 }; // Объект для хранения текущей скорости и направления ветра
+
+  // Функция для получения данных о ветре по координатам
+  function getWindData(lat, lon) {
+    return fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`)
+      .then(res => res.json()) // Преобразование ответа в формат JSON
+      .then(data => ({ speed: data.wind.speed, deg: data.wind.deg })); // Возврат скорости и направления ветра
+  }
+
+  // Функция для вычисления расстояния между двумя координатами
+  function haversineDistance(coord1, coord2) {
+    const R = 6371; // Радиус Земли в километрах
+    const toRad = x => x * Math.PI / 180; // Функция для преобразования градусов в радианы
+    const dLat = toRad(coord2[0] - coord1[0]); // Разница в широте
+    const dLon = toRad(coord2[1] - coord1[1]); // Разница в долготе
+    const lat1 = toRad(coord1[0]); // Широта первой точки в радианах
+    const lat2 = toRad(coord2[0]); // Широта второй точки в радианах
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2; // Формула Хаверсина
+    const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); // Вычисление угла
+    return R * c; // Возврат расстояния
+  }
+
+  // Инициализация карты после загрузки API Яндекс.Карт
+  ymaps.ready(() => {
+    map = new ymaps.Map("map", { center:[51.5,0.0], zoom:5 }); // Создание карты с центрированием на заданные координаты
+
+    // Обработчик события клика на карте
+    map.events.add('click', async function(e) {
+      const coords = e.get('coords'); // Получение координат клика
+
+      // Удаление ранее созданных объектов, если они существуют
+      if (circle) {
+        map.geoObjects.remove(circle);
+        map.geoObjects.remove(arrow);
+        map.geoObjects.remove(historyLine);
+        clearInterval(moveTimer); // Очистка таймера движения
+        clearInterval(windTimer); // Очистка таймера обновления ветра
+        path.length = 0; // Очистка массива пути
+      }
+
+      // Создание круга на карте
+      circle = new ymaps.Circle([coords,10000], {}, {
+        fillColor:"#87CEEB", fillOpacity:0.15,
+        strokeColor:"#87CEEB", strokeWidth:2, strokeOpacity:0.6
+      });
+      map.geoObjects.add(circle); // Добавление круга на карту
+
+      // Создание стрелки для отображения направления ветра
+      arrow = new ymaps.Placemark(coords, {}, {
+        preset:'islands#redArrowIcon',
+        iconRotate:true,
+        iconRotation:0
+      });
+      map.geoObjects.add(arrow); // Добавление стрелки на карту
+
+      // Создание линии для отображения пути
+      historyLine = new ymaps.Polyline([], {}, {
+        strokeColor:"#0000FF", strokeWidth:2, strokeOpacity:0.6
+      });
+      map.geoObjects.add(historyLine); // Добавление линии на карту
+
+      startMoving(); // Запуск движения
+    });
+  });
+
+  // Функция для начала движения круга и обновления информации о ветре
+  function startMoving() {
+    const updateWind = async () => {
+      const [lat, lon] = circle.geometry.getCoordinates(); // Получение координат круга
+      try {
+        const wind = await getWindData(lat, lon); // Получение данных о ветре
+        currentWind = wind; // Обновление текущего ветра
+        document.getElementById('windInfo').innerText =
+          `Скорость ветра: ${wind.speed.toFixed(1)} м/с\nНаправление: ${wind.deg}°`; // Обновление информации о ветре на странице
+      } catch(e) {
+        console.error(e); // Логирование ошибки в консоль
+        document.getElementById('windInfo').innerText = "Ошибка получения данных ветра"; // Обновление сообщения об ошибке
+      }
+    };
+
+    updateWind(); // Первоначальное обновление данных о ветре
+    windTimer = setInterval(updateWind, 60000); // Обновление данных о ветре каждые 60 секунд
+
+    moveTimer = setInterval(() => {
+      const [lat, lon] = circle.geometry.getCoordinates(); // Получение текущих координат круга
+      const angleRad = ((currentWind.deg + 90) % 360) * Math.PI / 180; // Преобразование угла направления в радианы
+      const dx = currentWind.speed * Math.sin(angleRad); // Вычисление изменения по долготе
+      const dy = -currentWind.speed * Math.cos(angleRad); // Вычисление изменения по широте
+      const newLat = lat + (dy / 111320); // Новая широта
+      const newLon = lon + (dx / (40075000 * Math.cos(lat * Math.PI / 180) / 360)); // Новая долгота
+      const newCoords = [newLat, newLon]; // Новые координаты
+
+      circle.geometry.setCoordinates(newCoords); // Обновление координат круга
+      arrow.geometry.setCoordinates(newCoords); // Обновление координат стрелки
+      arrow.options.set('iconRotation', currentWind.deg); // Обновление направления стрелки
+
+      path.push(newCoords); // Добавление новых координат в массив пути
+      historyLine.geometry.setCoordinates(path); // Обновление линии пути
+
+      let totalDistance = 0; // Переменная для хранения общей длины пути
+      for (let i = 1; i < path.length; i++) {
+        totalDistance += haversineDistance(path[i - 1], path[i]); // Вычисление общей длины пути
+      }
+      document.getElementById('pathInfo').innerText = `Длина пути: ${totalDistance.toFixed(2)} км`; // Обновление информации о длине пути
+    }, 1000); // Обновление каждую секунду
+  }
+</script>
+</body>
+</html>
